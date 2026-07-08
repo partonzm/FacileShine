@@ -24,7 +24,6 @@ Imports:
     dplyr,
     FacileData (>= 0.98.116),
     FacileViz (>= 0.1.10),
-    ggrepel,
     glue,               
     htmltools,
     miniUI,
