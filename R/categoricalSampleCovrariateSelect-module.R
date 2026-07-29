@@ -125,7 +125,6 @@ categoricalSampleCovariateSelectServer <- function(
     # covariates that are available from the underlying set of samples
     # (or updated set of `exclusions`)
     observeEvent(categorical_covariates(), {
-      browser()
       choices <- unique(categorical_covariates()$variable)
       
       ftrace(
