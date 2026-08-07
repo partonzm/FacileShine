@@ -253,6 +253,13 @@ fboxPlotServer <- function(id, rfds, ...,
         y = ylab
       )
       
+      if (input$rotate_x_labels) {
+        gg <- gg + 
+          ggplot2::theme(
+            axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
+          )
+      }
+      
       out <- plotly::ggplotly(gg, tooltip = "text")
       if (!sig.plot && multigene) {
         out <- plotly::layout(out, boxmode = "group")
@@ -262,7 +269,8 @@ fboxPlotServer <- function(id, rfds, ...,
     }, label = "fbox") |> 
       shiny::bindEvent(
         rdat(),
-        input$split_genes
+        input$split_genes,
+        input$rotate_x_labels
       )
     
     output$jqboxplot <- plotly::renderPlotly({
@@ -300,24 +308,40 @@ fboxPlotUI <- function(id, ..., debug = FALSE) {
       )
     ),
     
-    shiny::fluidRow(
-      shiny::column(
-        width = 12,
-        shiny::wellPanel(
+    shiny::wellPanel(
+      shiny::fluidRow(
+        shiny::column(
+          width = 12,
           categoricalAestheticMapInput(
             ns("aes"),
             color = TRUE,
             facet = TRUE,
             hover = TRUE
-          ),
+          )
+        )
+      ),
+      shiny::fluidRow(
+        shiny::column(
+          width = 3,
           shiny::checkboxInput(
             ns("individual"),
             label = "Plot Genes Individually",
-            value = FALSE
-          ),
+            value = FALSE,
+          )
+        ),
+        shiny::column(
+          width = 3,
           shiny::checkboxInput(
             ns("split_genes"),
             label = "Seperate plots by gene",
+            value = FALSE
+          )
+        ),
+        shiny::column(
+          width = 3,
+          shiny::checkboxInput(
+            ns("rotate_x_labels"),
+            label = "Rotate x-axis labels",
             value = FALSE
           )
         )
