@@ -17,7 +17,10 @@ fboxPlotServer <- function(id, rfds, ...,
       "aes", rfds, color = TRUE, facet = TRUE, hover = TRUE, ...)
     
     xaxis <- categoricalSampleCovariateSelectServer(
-      "xaxis", rfds, with_none = FALSE)
+      "xaxis",
+      rfds,
+      with_none = FALSE
+    )
     
     yaxis <- assayFeatureSelectServer("yaxis", rfds, gdb = gdb, debug = debug, ...)
     
@@ -34,8 +37,13 @@ fboxPlotServer <- function(id, rfds, ...,
     # wants to show multiple genes at once, faceting is disabled, ie. multiple
     # genes are selected in y-axis and "Individual" box is checked
     observe({
-      disabled <- isFALSE(input$individual) || nrow(yaxis$selected()) <= 1
-      shinyjs::toggleState("aes-facet", condition = disabled)
+      as.signature <- !(isFALSE(input$individual) || nrow(yaxis$selected()) <= 1)
+      # as.signature <- !input$individual
+      shinyjs::toggleState("aes-facet", condition = !as.signature)
+      shinyjs::toggleState(
+        "split_genes",
+        condition = input$individual && nrow(yaxis$selected()) > 1
+      )
     })
     
     # The quantitative data to plot, without aesthetic mappings
@@ -97,12 +105,13 @@ fboxPlotServer <- function(id, rfds, ...,
       add_aesthetic_covariates(aes, rdat.core())
     })
     
-    fbox <- eventReactive(rdat(), {
+    fbox <- reactive({
       dat <- req(rdat())
       yvals. <- yaxis$selected() |> dplyr::arrange(name)
       xaxis. <- xaxis$selected()
       aes. <- aes$map()
       indiv. <- input$individual
+      split.genes <- input$split_genes
       
       multigene <- nrow(yvals.) > 1
       sig.plot <- multigene && !indiv.
@@ -127,8 +136,22 @@ fboxPlotServer <- function(id, rfds, ...,
       }
       ftrace("drawing boxplot")
       
+      # you can plot three ways
+      # 1. single gene or multiple-gene-as-signature; these act the same
+      # 2. multigene, but genes are plotted within the same "facet"
+      # 3. multigene, but genes are plotted across facets
+
+      plot.type <- "single-value" # (1)
+      if (multigene && !sig.plot) {
+        plot.type <- if (split.genes) "facet-gene" else "dodge-gene"
+      }
+      message("plot type: ", plot.type)
+
+      # the ggplot2 code changes if you are doing a multigene split plot
+      # if you are plotting a single gene or a geneset score, that is the same
       gg <- ggplot2::ggplot(dat)
-      if (!sig.plot) {
+      if (plot.type == "dodge-gene") {
+        # scenario 2; multiple genes within facet
         gg <- gg + ggplot2::aes(
           x = .data[[xaxis.]],
           y = .data[["value"]],
@@ -136,6 +159,7 @@ fboxPlotServer <- function(id, rfds, ...,
           text = hover.
         )
       } else {
+        # scenario 1 or 3: plot.type %in% c("single-value", "facet-gene")
         gg <- gg + ggplot2::aes(
           x = .data[[xaxis.]],
           y = .data[["value"]],
@@ -143,29 +167,65 @@ fboxPlotServer <- function(id, rfds, ...,
         )
       }
       
-      if (!sig.plot && multigene) {
+      if (plot.type == "dodge-gene") {
         gg <- gg + 
           ggplot2::geom_boxplot(
             outliers = FALSE,
             position = ggplot2::position_dodge(width = 0.75)
-          ) +
-          ggplot2::geom_point(
+          )
+        if (!is.null(aes.$color)) {
+          gg <- gg + ggplot2::geom_point(
+            ggplot2::aes(color = .data[[aes.$color]]),
+            shape = 21,
             position = ggplot2::position_jitterdodge(
               jitter.width = 0.1,
               dodge.width = 0.75
             )
           )
+        } else {
+          gg <- gg + ggplot2::geom_point(
+            shape = 21,
+            position = ggplot2::position_jitterdodge(
+              jitter.width = 0.1,
+              dodge.width = 0.75
+            )
+          )
+        }
       } else {
-        gg <- gg + 
-          ggplot2::geom_boxplot(outliers = FALSE) +
-          ggplot2::geom_jitter(width = 0.1)
+        gg <- gg + ggplot2::geom_boxplot(outliers = FALSE)
+        if (!is.null(aes.$color)) {
+          gg <- gg + ggplot2::geom_jitter(
+            shape = 21,
+            ggplot2::aes(color = .data[[aes.$color]]),
+            width = 0.1
+          )
+        } else {
+          gg <- gg + ggplot2::geom_jitter(
+            shape = 21,
+            width = 0.1
+          )
+        }
       }
-      
-      if (!is.null(aes.$facet)) {
-        gg <- gg + ggplot2::facet_wrap(
-          ggplot2::vars(!!rlang::sym(aes.$facet)))
+
+      # deal with faceting
+      # browser()
+      do.facet <- !is.null(aes.$facet)
+      if (do.facet) {
+        if (plot.type == "facet-gene") {
+          gg <- gg +
+            ggplot2::facet_grid(
+              rows = ggplot2::vars(feature_name),
+              cols = ggplot2::vars(!!rlang::sym(aes.$facet))
+            )
+        } else {
+          gg <- gg + ggplot2::facet_wrap(
+            ggplot2::vars(!!rlang::sym(aes.$facet)))
+         }
+      } else if (plot.type == "facet-gene") {
+        gg <- gg +
+          ggplot2::facet_wrap(~ feature_name)
       }
-      
+
       gg <- gg + ggplot2::scale_x_discrete(
         guide = ggplot2::guide_axis(n.dodge = 2),
         labels = \(x) gsub("__", "\n", x)
@@ -193,13 +253,25 @@ fboxPlotServer <- function(id, rfds, ...,
         y = ylab
       )
       
+      if (input$rotate_x_labels) {
+        gg <- gg +
+          ggplot2::theme(
+            axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
+          )
+      }
+
       out <- plotly::ggplotly(gg, tooltip = "text")
       if (!sig.plot && multigene) {
         out <- plotly::layout(out, boxmode = "group")
       }
       
       out
-    }, label = "fbox")
+    }, label = "fbox") |>
+      shiny::bindEvent(
+        rdat(),
+        input$split_genes,
+        input$rotate_x_labels
+      )
     
     output$jqboxplot <- plotly::renderPlotly({
       # plot(req(fbox()))
@@ -232,17 +304,50 @@ fboxPlotUI <- function(id, ..., debug = FALSE) {
         shiny::wellPanel(assayFeatureSelectInput(ns("yaxis"), "Y Axis"))),
       shiny::column(
         width = 4,
-        shiny::checkboxInput(
-          ns("individual"),
-          label = "Plot Genes Individually",
-          value = FALSE),
-        batchCorrectConfigUI(ns("batch"), direction = "vertical"))),
-    shiny::fluidRow(
-      shiny::column(
-        width = 12,
-        shiny::wellPanel(
+        batchCorrectConfigUI(ns("batch"), direction = "vertical")
+      )
+    ),
+
+    shiny::wellPanel(
+      shiny::fluidRow(
+        shiny::column(
+          width = 12,
           categoricalAestheticMapInput(
-            ns("aes"), color = TRUE, facet = TRUE, hover = TRUE)))),
+            ns("aes"),
+            color = TRUE,
+            facet = TRUE,
+            hover = TRUE
+          )
+        )
+      ),
+      shiny::fluidRow(
+        shiny::column(
+          width = 3,
+          shiny::checkboxInput(
+            ns("individual"),
+            label = "Plot Genes Individually",
+            value = FALSE,
+          )
+        ),
+        shiny::column(
+          width = 3,
+          shiny::checkboxInput(
+            ns("split_genes"),
+            label = "Seperate plots by gene",
+            value = FALSE
+          )
+        ),
+        shiny::column(
+          width = 3,
+          shiny::checkboxInput(
+            ns("rotate_x_labels"),
+            label = "Rotate x-axis labels",
+            value = FALSE
+          )
+        )
+      )
+    ),
+
     shinyjs::disabled(shiny::downloadButton(ns("dldata"), "Download Data")),
     
     # shiny::fluidRow(

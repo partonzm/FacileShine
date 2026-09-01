@@ -84,7 +84,7 @@ categoricalSampleCovariateSelectServer <- function(
     }, {
       req(initialized(rfds))
       asamples <- rfds$active_samples()
-      
+      # browser()
       out <- rfds$active_covariates() |> 
         dplyr::filter(.data$class == "categorical") |>
         dplyr::filter(!.data$variable %in% state$exclude) |> 
